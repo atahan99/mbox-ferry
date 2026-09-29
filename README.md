@@ -33,8 +33,8 @@ retries temporary failures, saves its progress, and resumes after being stopped.
 
 ## Setup
 
-Open `.env` and enter the source folder and the IMAP details shown in Proton
-Bridge under **Mailbox details**:
+Copy `.env.example` to `.env`, then enter the source folder and the IMAP details
+shown in Proton Bridge under **Mailbox details**:
 
 ```dotenv
 SOURCE_FOLDER=C:\path\to\Thunderbird\Mail\Local Folders
