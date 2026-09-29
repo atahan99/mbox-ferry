@@ -1,0 +1,24 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+dist/
+build/
+*.egg-info/
+
+# Import state and reports can contain mailbox folder names and message hashes.
+*.state.json
+mbox-ferry-state.json
+*.log
+
+# Never commit credentials or exported mail.
+.env
+*password*
+*.mbox
+*.eml
+*.pst
+*.ost
+
