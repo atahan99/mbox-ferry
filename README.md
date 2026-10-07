@@ -45,6 +45,22 @@ BRIDGE_PASSWORD=bridge-generated-password
 
 The Bridge password is not your normal Proton account password.
 
+### Optional Sent-folder sender repair
+
+Some Outlook exports contain only a display name in the `From` header. To
+replace those invalid senders by message date, add these values to `.env`:
+
+```dotenv
+FALLBACK_SENDER_EMAIL=unknown@invalid.local
+SENT_FROM_CUTOFF=2023-01-01
+SENT_FROM_BEFORE_EMAIL=old-address@example.com
+SENT_FROM_AFTER_EMAIL=new-address@example.com
+```
+
+The rule applies only to standard Sent folders. Corrected copies receive stable
+new Message-IDs so the destination server cannot reuse an earlier malformed
+copy. Leave the three `SENT_FROM_*` values blank to disable the rule.
+
 ## Run it
 
 First run a preview:

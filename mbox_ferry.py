@@ -21,15 +21,24 @@ import ssl
 import sys
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Iterable
 
 
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 STATE_VERSION = 1
 RETRY_DELAYS = (2, 5, 10, 20, 40, 60, 120, 180)
-ENV_KEYS = {"SOURCE_FOLDER", "DESTINATION_FOLDER", "BRIDGE_USERNAME", "BRIDGE_PASSWORD"}
+ENV_KEYS = {
+    "SOURCE_FOLDER",
+    "DESTINATION_FOLDER",
+    "BRIDGE_USERNAME",
+    "BRIDGE_PASSWORD",
+    "FALLBACK_SENDER_EMAIL",
+    "SENT_FROM_CUTOFF",
+    "SENT_FROM_BEFORE_EMAIL",
+    "SENT_FROM_AFTER_EMAIL",
+}
 IGNORED_NAMES = {
     "msgfilterrules.dat",
     "virtualfolders.dat",
@@ -203,7 +212,13 @@ def flags_for(message: mailbox.mboxMessage) -> str | None:
     return None
 
 
-def repaired_copy(raw: bytes, replacement_from: str) -> bytes:
+def repaired_copy(
+    raw: bytes,
+    replacement_from: str,
+    *,
+    force_from: bool = False,
+    message_id_salt: str | None = None,
+) -> bytes:
     """Return a standards-compliant copy while preserving broken headers."""
     message = email.message_from_bytes(raw, policy=email.policy.default)
 
@@ -219,7 +234,7 @@ def repaired_copy(raw: bytes, replacement_from: str) -> bytes:
 
     from_values = message.get_all("From", [])
     from_addresses = email.utils.getaddresses([str(value) for value in from_values])
-    if not from_values or not any("@" in address for _, address in from_addresses):
+    if force_from or not from_values or not any("@" in address for _, address in from_addresses):
         preserve_and_replace("From", replacement_from)
     for header in ("To", "Cc", "Bcc", "Reply-To"):
         values = message.get_all(header, [])
@@ -232,7 +247,11 @@ def repaired_copy(raw: bytes, replacement_from: str) -> bytes:
 
     if not message.get("Date"):
         message["Date"] = email.utils.format_datetime(datetime.now().astimezone())
-    if not message.get("Message-ID"):
+    if message_id_salt is not None:
+        preserve_and_replace("Message-ID", None)
+        digest = hashlib.sha256(raw + b"\0" + message_id_salt.encode()).hexdigest()[:32]
+        message["Message-ID"] = f"<{digest}@mbox-ferry.invalid>"
+    elif not message.get("Message-ID"):
         digest = hashlib.sha256(raw).hexdigest()[:32]
         message["Message-ID"] = f"<{digest}@recovered.invalid>"
     message["X-Mbox-Ferry-Repair"] = "Header-only repair; original mbox message was not modified"
@@ -246,6 +265,26 @@ def is_loopback(host: str) -> bool:
         return ipaddress.ip_address(host).is_loopback
     except ValueError:
         return False
+
+
+def sent_sender_for(
+    source: SourceMailbox,
+    message: mailbox.mboxMessage,
+    cutoff: date | None,
+    before: str | None,
+    after: str | None,
+) -> str | None:
+    if cutoff is None or before is None or after is None:
+        return None
+    if clean_segment(source.path.name).casefold() not in {"sent", "sent items", "sent mail"}:
+        return None
+    try:
+        sent_at = email.utils.parsedate_to_datetime(message.get("Date", ""))
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise RuntimeError(f"Sent message has no usable date in {source.relative_name}") from exc
+    if sent_at is None:
+        raise RuntimeError(f"Sent message has no usable date in {source.relative_name}")
+    return before if sent_at.date() < cutoff else after
 
 
 def batches(values: list[bytes], size: int = 250) -> Iterable[list[bytes]]:
@@ -427,6 +466,7 @@ class Importer:
 
 def build_parser() -> argparse.ArgumentParser:
     source_default = os.environ.get("SOURCE_FOLDER") or None
+    fallback_sender = os.environ.get("FALLBACK_SENDER_EMAIL", "unknown@invalid.local")
     parser = argparse.ArgumentParser(
         description="Safely copy Thunderbird-style mbox folders through an IMAP bridge"
     )
@@ -454,8 +494,24 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--replacement-from",
-        default="Recovered message <unknown@invalid.local>",
+        default=f"Recovered message <{fallback_sender}>",
         help="Sender used only when repairing a malformed From header",
+    )
+    parser.add_argument(
+        "--sent-from-cutoff",
+        type=date.fromisoformat,
+        default=os.environ.get("SENT_FROM_CUTOFF") or None,
+        help="Date when Sent-folder messages switch sender address (YYYY-MM-DD)",
+    )
+    parser.add_argument(
+        "--sent-from-before",
+        default=os.environ.get("SENT_FROM_BEFORE_EMAIL") or None,
+        help="Sender address before --sent-from-cutoff",
+    )
+    parser.add_argument(
+        "--sent-from-after",
+        default=os.environ.get("SENT_FROM_AFTER_EMAIL") or None,
+        help="Sender address on or after --sent-from-cutoff",
     )
     parser.add_argument("--max-depth", type=int, default=3, help="Maximum destination hierarchy depth")
     parser.add_argument("--delay", type=float, default=0.15, help="Seconds between uploads")
@@ -515,8 +571,24 @@ def run_import(args: argparse.Namespace, sources: list[SourceMailbox]) -> int:
             try:
                 for index, message in enumerate(box, start=1):
                     raw = message.as_bytes(unixfrom=False)
+                    sender = sent_sender_for(
+                        source,
+                        message,
+                        args.sent_from_cutoff,
+                        args.sent_from_before,
+                        args.sent_from_after,
+                    )
+                    if sender:
+                        salt = f"sent-from:{args.sent_from_cutoff.isoformat()}:{sender}"
+                        raw = repaired_copy(
+                            raw,
+                            sender,
+                            force_from=True,
+                            message_id_salt=salt,
+                        )
                     digest = source_fingerprint(raw)
-                    message_id = normalize_message_id(message.get("Message-ID"))
+                    prepared = email.message_from_bytes(raw, policy=email.policy.default)
+                    message_id = normalize_message_id(prepared.get("Message-ID"))
                     if message_id:
                         source_occurrences[message_id] += 1
                     # Remote IDs cover fresh reruns; fingerprints cover messages without IDs.
@@ -587,6 +659,15 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--max-depth must be at least 2")
     if args.delay < 0:
         parser.error("--delay cannot be negative")
+    sender_rule = (args.sent_from_cutoff, args.sent_from_before, args.sent_from_after)
+    if any(sender_rule) and not all(sender_rule):
+        parser.error(
+            "SENT_FROM_CUTOFF, SENT_FROM_BEFORE_EMAIL, and SENT_FROM_AFTER_EMAIL "
+            "must be set together"
+        )
+    for address in (args.sent_from_before, args.sent_from_after):
+        if address and "@" not in email.utils.parseaddr(address)[1]:
+            parser.error(f"Invalid sender email address: {address}")
 
     sources = discover_mboxes(args.source, args.destination, args.max_depth)
     if not sources:
