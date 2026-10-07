@@ -234,6 +234,7 @@ def repaired_copy(
 
     from_values = message.get_all("From", [])
     from_addresses = email.utils.getaddresses([str(value) for value in from_values])
+    # Normal repair fixes invalid From headers; the optional Sent rule forces a known address.
     if force_from or not from_values or not any("@" in address for _, address in from_addresses):
         preserve_and_replace("From", replacement_from)
     for header in ("To", "Cc", "Bcc", "Reply-To"):
@@ -248,6 +249,7 @@ def repaired_copy(
     if not message.get("Date"):
         message["Date"] = email.utils.format_datetime(datetime.now().astimezone())
     if message_id_salt is not None:
+        # Sender rewrites need a different, repeatable ID to avoid server-side deduplication.
         preserve_and_replace("Message-ID", None)
         digest = hashlib.sha256(raw + b"\0" + message_id_salt.encode()).hexdigest()[:32]
         message["Message-ID"] = f"<{digest}@mbox-ferry.invalid>"
@@ -274,6 +276,7 @@ def sent_sender_for(
     before: str | None,
     after: str | None,
 ) -> str | None:
+    """Choose the configured address only for recognized Sent folders."""
     if cutoff is None or before is None or after is None:
         return None
     if clean_segment(source.path.name).casefold() not in {"sent", "sent items", "sent mail"}:
@@ -571,6 +574,7 @@ def run_import(args: argparse.Namespace, sources: list[SourceMailbox]) -> int:
             try:
                 for index, message in enumerate(box, start=1):
                     raw = message.as_bytes(unixfrom=False)
+                    # Transform before hashing so checkpoints describe the corrected copy.
                     sender = sent_sender_for(
                         source,
                         message,

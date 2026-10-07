@@ -57,9 +57,23 @@ SENT_FROM_BEFORE_EMAIL=old-address@example.com
 SENT_FROM_AFTER_EMAIL=new-address@example.com
 ```
 
-The rule applies only to standard Sent folders. Corrected copies receive stable
-new Message-IDs so the destination server cannot reuse an earlier malformed
-copy. Leave the three `SENT_FROM_*` values blank to disable the rule.
+| Setting | Purpose |
+| --- | --- |
+| `FALLBACK_SENDER_EMAIL` | Used when Proton rejects a malformed `From` header and no Sent-folder rule applies. |
+| `SENT_FROM_CUTOFF` | Address-change date in `YYYY-MM-DD` format. |
+| `SENT_FROM_BEFORE_EMAIL` | Sender used for messages dated before the cutoff. |
+| `SENT_FROM_AFTER_EMAIL` | Sender used on the cutoff date and afterward. |
+
+All three `SENT_FROM_*` values must be set together. Leave them blank to disable
+the rule. It applies only to folders named `Sent`, `Sent Items`, or `Sent Mail`.
+
+The repair changes only message headers; the body, recipients, attachments, and
+original date remain intact. The old `From` and Message-ID values are preserved
+in `X-Original-*` headers. A stable new Message-ID prevents Proton from matching
+the corrected copy to an earlier malformed import and also makes retries safe.
+
+For an existing import, use a temporary destination folder first. Verify the
+corrected messages before removing the old copies.
 
 ## Run it
 
