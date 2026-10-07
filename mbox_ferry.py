@@ -63,6 +63,7 @@ def load_env_file(path: Path) -> set[str]:
             )
         if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
             value = value[1:-1]
+        # Values set by the shell take precedence over the local .env file.
         if name not in os.environ:
             os.environ[name] = value
             loaded.add(name)
@@ -139,6 +140,7 @@ def destination_for(root: str, parts: list[str], max_depth: int) -> str:
         raise ValueError(
             f"Destination {root!r} already uses the configured maximum depth of {max_depth}"
         )
+    # Keep deep source trees within Proton's folder-depth limit.
     if len(parts) > available:
         parts = parts[: available - 1] + [" - ".join(parts[available - 1 :])]
     return "/".join(base + parts)
@@ -284,6 +286,7 @@ class Importer:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.state_path.with_suffix(self.state_path.suffix + ".tmp")
         temporary.write_text(json.dumps(self.state, indent=2, sort_keys=True), encoding="utf-8")
+        # Atomic replacement prevents Ctrl+C from leaving a half-written checkpoint.
         temporary.replace(self.state_path)
 
     def connect(self) -> None:
@@ -296,6 +299,7 @@ class Importer:
         connection = imaplib.IMAP4(self.host, self.port, timeout=120)
         context = ssl.create_default_context()
         if local:
+            # Bridge uses a self-signed certificate, but only on the local machine.
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
         connection.starttls(ssl_context=context)
@@ -334,6 +338,7 @@ class Importer:
         result: collections.Counter[str] = collections.Counter()
         status, data = self.conn.uid("search", None, "ALL")
         uids = (data[0] or b"").split() if status == "OK" else []
+        # Small batches avoid oversized IMAP commands on large folders.
         for group in batches(uids):
             sequence = b",".join(group).decode("ascii")
             status, fetched = self.conn.uid(
@@ -381,6 +386,7 @@ class Importer:
                 if status == "OK":
                     return True, False, ""
                 if is_format_error(detail):
+                    # Never rewrite a message unless Bridge rejects the original as malformed.
                     repaired = repaired_copy(raw, self.replacement_from)
                     status, repaired_response = self.append_once(
                         destination, repaired, flags, internal_date
@@ -437,15 +443,9 @@ def build_parser() -> argparse.ArgumentParser:
         default=os.environ.get("DESTINATION_FOLDER", "Folders/Imported Mail"),
         help="Destination mailbox root",
     )
-    parser.add_argument(
-        "--host", default="127.0.0.1", help="IMAP host"
-    )
-    parser.add_argument(
-        "--port", type=int, default=1143, help="IMAP STARTTLS port"
-    )
-    parser.add_argument(
-        "--username", default=os.environ.get("BRIDGE_USERNAME"), help="IMAP username"
-    )
+    parser.add_argument("--host", default="127.0.0.1", help="IMAP host")
+    parser.add_argument("--port", type=int, default=1143, help="IMAP STARTTLS port")
+    parser.add_argument("--username", default=os.environ.get("BRIDGE_USERNAME"), help="IMAP username")
     parser.add_argument(
         "--state",
         type=Path,
@@ -457,18 +457,8 @@ def build_parser() -> argparse.ArgumentParser:
         default="Recovered message <unknown@invalid.local>",
         help="Sender used only when repairing a malformed From header",
     )
-    parser.add_argument(
-        "--max-depth",
-        type=int,
-        default=3,
-        help="Maximum destination hierarchy depth",
-    )
-    parser.add_argument(
-        "--delay",
-        type=float,
-        default=0.15,
-        help="Seconds between uploads",
-    )
+    parser.add_argument("--max-depth", type=int, default=3, help="Maximum destination hierarchy depth")
+    parser.add_argument("--delay", type=float, default=0.15, help="Seconds between uploads")
     parser.add_argument("--execute", action="store_true", help="Perform uploads")
     parser.add_argument(
         "--allow-remote-imap", action="store_true", help="Permit a non-loopback IMAP host"
@@ -529,6 +519,7 @@ def run_import(args: argparse.Namespace, sources: list[SourceMailbox]) -> int:
                     message_id = normalize_message_id(message.get("Message-ID"))
                     if message_id:
                         source_occurrences[message_id] += 1
+                    # Remote IDs cover fresh reruns; fingerprints cover messages without IDs.
                     already_remote = bool(
                         message_id and remote_ids[message_id] >= source_occurrences[message_id]
                     )
@@ -584,6 +575,7 @@ def run_import(args: argparse.Namespace, sources: list[SourceMailbox]) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Support both running beside .env and running from a configured working directory.
     project_env = Path(__file__).resolve().with_name(".env")
     load_env_file(project_env)
     working_env = Path.cwd() / ".env"
