@@ -53,9 +53,13 @@ replace those invalid senders by message date, add these values to `.env`:
 ```dotenv
 FALLBACK_SENDER_EMAIL=unknown@invalid.local
 SENT_FROM_CUTOFF=2023-01-01
-SENT_FROM_BEFORE_EMAIL=old-address@example.com
-SENT_FROM_AFTER_EMAIL=new-address@example.com
+SENT_FROM_BEFORE_EMAIL=student-name@university.edu
+SENT_FROM_AFTER_EMAIL=student-name@alumni.university.edu
 ```
+
+In this example, messages dated before January 1, 2023 use the student's
+university address. Messages dated January 1, 2023 or later use the alumni
+address. Set the cutoff to the date when your own address changed.
 
 | Setting | Purpose |
 | --- | --- |
