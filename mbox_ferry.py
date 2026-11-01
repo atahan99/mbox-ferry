@@ -38,6 +38,8 @@ ENV_KEYS = {
     "SENT_FROM_CUTOFF",
     "SENT_FROM_BEFORE_EMAIL",
     "SENT_FROM_AFTER_EMAIL",
+    "OUTLOOK_STORE",
+    "OUTLOOK_RECOVERY_FOLDER",
 }
 IGNORED_NAMES = {
     "msgfilterrules.dat",
@@ -650,15 +652,7 @@ def run_import(args: argparse.Namespace, sources: list[SourceMailbox]) -> int:
     return 0 if failed_total == 0 else 2
 
 
-def main(argv: list[str] | None = None) -> int:
-    # Support both running beside .env and running from a configured working directory.
-    project_env = Path(__file__).resolve().with_name(".env")
-    load_env_file(project_env)
-    working_env = Path.cwd() / ".env"
-    if working_env.resolve() != project_env:
-        load_env_file(working_env)
-    parser = build_parser()
-    args = parser.parse_args(argv)
+def validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     if args.max_depth < 2:
         parser.error("--max-depth must be at least 2")
     if args.delay < 0:
@@ -672,6 +666,18 @@ def main(argv: list[str] | None = None) -> int:
     for address in (args.sent_from_before, args.sent_from_after):
         if address and "@" not in email.utils.parseaddr(address)[1]:
             parser.error(f"Invalid sender email address: {address}")
+
+
+def main(argv: list[str] | None = None) -> int:
+    # Support both running beside .env and running from a configured working directory.
+    project_env = Path(__file__).resolve().with_name(".env")
+    load_env_file(project_env)
+    working_env = Path.cwd() / ".env"
+    if working_env.resolve() != project_env:
+        load_env_file(working_env)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    validate_args(parser, args)
 
     sources = discover_mboxes(args.source, args.destination, args.max_depth)
     if not sources:

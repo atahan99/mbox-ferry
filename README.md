@@ -79,6 +79,42 @@ the corrected copy to an earlier malformed import and also makes retries safe.
 For an existing import, use a temporary destination folder first. Verify the
 corrected messages before removing the old copies.
 
+### Optional Outlook recipient recovery (Windows)
+
+Some Outlook/PST imports keep only recipient display names in Thunderbird, such
+as `To: Jane Smith`, and omit the actual email address. Proton cannot accept that
+as a valid address, so Mbox Ferry normally uses `Undisclosed recipients`.
+
+On Windows, `outlook_recipient_recovery.py` can recover the original To/Cc/Bcc
+addresses from classic Outlook. It uses Outlook's local data through PowerShell;
+no extra Python package is required. Outlook must be open with the original Sent
+Items available.
+
+Optional `.env` settings:
+
+```dotenv
+# Leave blank to search every Outlook store.
+OUTLOOK_STORE=
+OUTLOOK_RECOVERY_FOLDER=Sent Items Recovered
+```
+
+First run a read-only preview:
+
+```console
+python outlook_recipient_recovery.py
+```
+
+If every mbox message is matched and every recipient is resolved, upload the
+corrected copies to the separate recovery folder:
+
+```console
+python outlook_recipient_recovery.py --execute
+```
+
+The helper never deletes or renames existing messages. Verify the recovery
+folder before replacing an earlier import. It is Windows-only; the main Mbox
+Ferry importer remains cross-platform.
+
 ## Run it
 
 First run a preview:
